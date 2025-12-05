@@ -7,7 +7,7 @@ from datetime import datetime
 # =========================
 # CONFIGURATION
 # =========================
-CLOB_URL = "https://clob.polymarket.com/clob/markets"
+API_URL = "https://api.polymarket.com/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
@@ -22,72 +22,57 @@ def load_history():
         with open(HISTORY_FILE, "r") as f:
             try:
                 return json.load(f)
-            except json.JSONDecodeError:
+            except:
                 return {}
     return {}
 
 
 # =========================
-# FETCH CURRENT PRICES
+# FETCH DATA
 # =========================
 def fetch_current_prices():
-    print("Fetching market data from CLOB API...")
+    print("Fetching market data from Polymarket Data API...")
 
     try:
-        params = {"limit": 200}
-        response = requests.get(CLOB_URL, params=params)
+        response = requests.get(API_URL)
         response.raise_for_status()
 
-        raw = response.json()
-        markets = raw.get("markets", [])
+        markets = response.json()
+        print(f"DEBUG: Received {len(markets)} markets")
 
-        print(f"DEBUG: Received {len(markets)} markets from CLOB")
+        snapshot = {}
+        now = datetime.now().isoformat()
 
-        data_snapshot = {}
-        current_time = datetime.now().isoformat()
+        for m in markets:
+            m_id = m.get("id")
+            title = m.get("question", f"Market {m_id}")
 
-        for market in markets:
-            if not isinstance(market, dict):
-                continue
-
-            m_id = market.get("id")
-            title = market.get("question", f"Market {m_id}")
-
-            outcomes = market.get("outcomes", [])
+            outcomes = m.get("outcomes", [])
             if not outcomes:
                 continue
 
-            # CLOB uses bestBid / bestAsk instead of "price"
+            # outcomes[n].price 존재
             try:
-                best_bid = outcomes[0].get("bestBid")
-                best_ask = outcomes[0].get("bestAsk")
-
-                if best_bid is None or best_ask is None:
-                    continue
-
-                price = (float(best_bid) + float(best_ask)) / 2
+                price = float(outcomes[0].get("price"))
             except:
                 continue
 
-            # volume field handling
-            volume = market.get("volume") or market.get("24hVolume") or 0
-            try:
-                if float(volume) <= 0:
-                    continue
-            except:
+            # volume 필터
+            volume = m.get("volume", 0)
+            if volume is None or float(volume) <= 0:
                 continue
 
-            data_snapshot[m_id] = {
+            snapshot[m_id] = {
                 "title": title,
                 "price": price,
-                "timestamp": current_time
+                "timestamp": now
             }
 
-        print(f"DEBUG: Snapshot processed {len(data_snapshot)} markets")
-        return data_snapshot
+        print(f"DEBUG: Snapshot processed {len(snapshot)} markets")
+        return snapshot
 
     except Exception as e:
-        print(f"❌ Error while fetching CLOB data: {e}")
+        print(f"❌ Error fetching data: {e}")
         return {}
 
 
@@ -104,35 +89,30 @@ def update_history(history, snapshot):
             "p": data["price"]
         })
 
-        # Keep only last 336 data points (7 days if 30 min interval)
+        # Keep last week data
         history[m_id]["prices"] = history[m_id]["prices"][-336:]
 
     return history
 
 
 # =========================
-# CORRELATION
+# CALCULATE CORRELATION
 # =========================
 def calculate_correlation(history):
     print("Calculating correlations...")
 
     data_dict = {}
-
-    # Convert to Pandas series
     for m_id, content in history.items():
         if len(content["prices"]) < 5:
             continue
-        prices = [entry["p"] for entry in content["prices"]]
-        data_dict[m_id] = pd.Series(prices)
+        data_dict[m_id] = pd.Series([p["p"] for p in content["prices"]])
 
     if not data_dict:
         return [], []
 
     df = pd.DataFrame(data_dict)
-
-    # Fill missing data safely
-    df = df.fillna(method='ffill').fillna(method='bfill')
-    df = df.dropna(axis=1, how='all')
+    df = df.fillna(method="ffill").fillna(method="bfill")
+    df = df.dropna(axis=1, how="all")
 
     if df.empty:
         return [], []
@@ -142,25 +122,23 @@ def calculate_correlation(history):
     nodes = []
     links = []
 
-    # Build nodes
-    for m_id in corr.columns:
+    # nodes
+    for col in corr.columns:
         nodes.append({
-            "id": m_id,
-            "label": history[m_id]["title"],
+            "id": col,
+            "label": history[col]["title"],
             "val": 1
         })
 
-    # Build edges
+    # edges
     cols = corr.columns
     for i in range(len(cols)):
         for j in range(i + 1, len(cols)):
-            a = cols[i]
-            b = cols[j]
+            a, b = cols[i], cols[j]
             val = corr.iloc[i, j]
 
             if pd.isna(val):
                 continue
-
             if abs(val) >= MIN_CORRELATION:
                 links.append({
                     "source": a,
@@ -178,28 +156,26 @@ def main():
     history = load_history()
     snapshot = fetch_current_prices()
 
-    if snapshot:
-        updated = update_history(history, snapshot)
-
-        # Save history
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(updated, f)
-
-        # Build graph data
-        nodes, links = calculate_correlation(updated)
-        graph_data = {
-            "nodes": nodes,
-            "links": links,
-            "last_updated": datetime.now().isoformat()
-        }
-
-        with open(OUTPUT_FILE, "w") as f:
-            json.dump(graph_data, f)
-
-        print(f"✅ Update Complete — Nodes: {len(nodes)}, Links: {len(links)}")
-
-    else:
+    if not snapshot:
         print("⚠️ No data fetched.")
+        return
+
+    updated = update_history(history, snapshot)
+
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(updated, f)
+
+    nodes, links = calculate_correlation(updated)
+    graph_data = {
+        "nodes": nodes,
+        "links": links,
+        "last_updated": datetime.now().isoformat()
+    }
+
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(graph_data, f)
+
+    print(f"✅ Update complete — Nodes: {len(nodes)}, Links: {len(links)}")
 
 
 if __name__ == "__main__":
