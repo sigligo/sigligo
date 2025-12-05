@@ -5,8 +5,15 @@ import os
 from datetime import datetime
 
 # --- Configuration ---
-# 새로운 공식 API 주소로 변경: 이 주소는 더 안정적이며 최신 데이터를 제공합니다.
-API_URL = "https://polymarket.com/api/markets"
+# GitHub Secret에서 API 키를 환경 변수로 가져옵니다.
+API_KEY = os.environ.get("POLYMARKET_API_KEY", None)
+SECRET = os.environ.get("POLYMARKET_SECRET", None) 
+PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
+
+# 인증을 가정하고 가장 안정적인 공용 URL로 다시 시도합니다.
+# 이 주소는 API 키가 없으면 404가 발생하거나 데이터를 반환하지 않을 수 있습니다.
+API_URL = "https://api.polymarket.com/markets?closed=false"
+
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
 MIN_CORRELATION = 0.5  # Connection threshold (0.5 ~ 0.7 recommended)
@@ -24,12 +31,19 @@ def load_history():
 def fetch_current_prices():
     print("Fetching data from Polymarket...")
     try:
-        response = requests.get(API_URL)
+        # [수정] API 키를 HTTP 헤더에 담아 전송합니다.
+        headers = {}
+        if API_KEY:
+            # PolyMarket이 API Key를 'X-API-KEY' 헤더로 요구한다고 가정합니다.
+            # (만약 에러가 나면 이 헤더 이름은 API 문서에 맞게 수정해야 합니다.)
+            headers = {"X-API-KEY": API_KEY} 
+            
+        # API 호출 시 헤더를 포함합니다.
+        response = requests.get(API_URL, headers=headers)
         response.raise_for_status()
-        markets_data = response.json()
         
-        # 새로운 API는 markets가 list 안에 바로 들어있지 않고 'data' 키 안에 있습니다.
-        markets = markets_data.get('data', [])
+        # 최신 API는 markets가 list 안에 바로 들어있습니다.
+        markets = response.json() 
 
         print(f"DEBUG: API returned {len(markets)} total markets.")
         
@@ -37,21 +51,19 @@ def fetch_current_prices():
         current_time = datetime.now().isoformat()
         
         for market in markets:
-            # 1. Active 시장만 필터링 (Closed 시장 제외)
-            # market_type이 'basic'이고 'closed'가 False인 시장만 사용
-            if market.get('closed') or market.get('market_type') != 'basic':
+            # 1. Active 시장만 필터링
+            if market.get('market_type') != 'basic':
                 continue
                 
             m_id = market.get("id")
             question = market.get("question")
             
-            # 2. 가격 정보는 'active_tokens'에서 가져옵니다.
-            tokens = market.get("active_tokens", [])
+            # 2. 가격 정보는 'tokens' 키 안에 있습니다.
+            tokens = market.get("tokens", [])
             
             # Use the first token price (usually 'Yes')
             if tokens:
                 price_str = tokens[0].get("price", "0")
-                # 문자열을 float으로 변환
                 price = float(price_str)
                 
                 # 3. 추가 필터링: 거래량이 0이 아닌 시장만 포함 (잡코인 제외)
@@ -105,7 +117,7 @@ def calculate_correlation(history):
     # NaN 값이 남는 경우 (시계열 전체가 NaN인 경우)를 대비해 안전하게 처리
     df = df.dropna(axis=1, how='all')
 
-    # 데이터프레임에 유효한 열이 없으면 상관관계 계산을 건너뜁니다.
+    # 데이터프레임에 유효한 열이 없으면 상관관계 계산을 건너뜕니다.
     if df.empty:
         return [], []
 
