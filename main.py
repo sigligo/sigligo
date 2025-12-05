@@ -49,31 +49,34 @@ def fetch_current_prices():
         current_time = datetime.now().isoformat()
         
         for market in markets:
-            # 이전 코드에서 20개 데이터를 0개로 만든 주 원인!
-            # 시장 유형 필터링을 완전히 제거하고, 데이터를 최대한 가져오도록 변경합니다.
-            # if market.get('market_type') != 'basic':
-            #     continue 
-                
+            
+            # 이전 코드에서 데이터를 0개로 만든 모든 필터링 조건을 해제하고,
+            # 가격 정보를 안전하게 가져와 저장하는 로직만 남깁니다.
+            
             m_id = market.get("id")
             # question 필드가 누락될 경우를 대비해 안전하게 가져옵니다.
             question = market.get("question", f"Market ID: {m_id}")
             
+            # 가격을 가져오지 못하면 기본값 0.5로 설정하여 일단 저장
+            price = 0.5 
+            
             # 가격 정보는 'tokens' 키 안에 있습니다.
             tokens = market.get("tokens", [])
             
-            # Use the first token price (usually 'Yes')
-            if tokens:
-                price_str = tokens[0].get("price", "0")
-                price = float(price_str)
-                
-                # 거래량이 0인 시장만 필터링합니다. (가장 기본적인 필터만 남김)
-                # volume 필드가 아예 누락될 경우 0으로 처리되어 필터링됩니다.
-                if float(market.get('volume', 0)) > 0:
-                    data_snapshot[m_id] = {
-                        "title": question,
-                        "price": price,
-                        "timestamp": current_time
-                    }
+            # 가격 정보가 있다면 가져오고, 유효하지 않으면 기본값 0.5 유지
+            if tokens and tokens[0].get("price"):
+                try:
+                    price = float(tokens[0].get("price"))
+                except ValueError:
+                    # 가격 필드가 유효하지 않은 문자열일 경우 이 시장은 건너뜁니다.
+                    continue
+            
+            # 모든 필터링 제거 완료. 데이터 저장!
+            data_snapshot[m_id] = {
+                "title": question,
+                "price": price,
+                "timestamp": current_time
+            }
 
         print(f"DEBUG: Processed {len(data_snapshot)} markets into snapshot.")
         return data_snapshot
