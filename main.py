@@ -30,7 +30,7 @@ def load_history():
 def fetch_current_prices():
     print("Fetching data from Polymarket...")
     try:
-        # [수정] API 키를 HTTP 헤더에 담아 전송합니다.
+        # API 키를 HTTP 헤더에 담아 전송합니다.
         headers = {}
         if API_KEY:
             # 현재 'X-API-KEY'로 인증을 시도합니다.
@@ -49,15 +49,16 @@ def fetch_current_prices():
         current_time = datetime.now().isoformat()
         
         for market in markets:
-            # 1. [핵심 수정 부분] market_type 필터링을 제거합니다. 
-            # (로그에서 확인된, 데이터를 0개로 만든 주된 원인입니다.)
+            # 이전 코드에서 20개 데이터를 0개로 만든 주 원인!
+            # 시장 유형 필터링을 완전히 제거하고, 데이터를 최대한 가져오도록 변경합니다.
             # if market.get('market_type') != 'basic':
             #     continue 
                 
             m_id = market.get("id")
-            question = market.get("question")
+            # question 필드가 누락될 경우를 대비해 안전하게 가져옵니다.
+            question = market.get("question", f"Market ID: {m_id}")
             
-            # 2. 가격 정보는 'tokens' 키 안에 있습니다.
+            # 가격 정보는 'tokens' 키 안에 있습니다.
             tokens = market.get("tokens", [])
             
             # Use the first token price (usually 'Yes')
@@ -65,7 +66,8 @@ def fetch_current_prices():
                 price_str = tokens[0].get("price", "0")
                 price = float(price_str)
                 
-                # 3. [유지] 추가 필터링: 거래량이 0이 아닌 시장만 포함 (잡코인 제외)
+                # 거래량이 0인 시장만 필터링합니다. (가장 기본적인 필터만 남김)
+                # volume 필드가 아예 누락될 경우 0으로 처리되어 필터링됩니다.
                 if float(market.get('volume', 0)) > 0:
                     data_snapshot[m_id] = {
                         "title": question,
