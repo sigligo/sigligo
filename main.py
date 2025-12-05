@@ -10,8 +10,7 @@ API_KEY = os.environ.get("POLYMARKET_API_KEY", None)
 SECRET = os.environ.get("POLYMARKET_SECRET", None) 
 PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
-# 인증을 가정하고 가장 안정적인 공용 URL로 다시 시도합니다.
-# 이 주소는 API 키가 없으면 404가 발생하거나 데이터를 반환하지 않을 수 있습니다.
+# 인증을 가정하고 가장 안정적인 주소로 재시도합니다. (DNS 오류 우회 주소)
 API_URL = "https://gamma-api.polymarket.com/markets?closed=false"
 
 HISTORY_FILE = "data_history.json"
@@ -34,8 +33,7 @@ def fetch_current_prices():
         # [수정] API 키를 HTTP 헤더에 담아 전송합니다.
         headers = {}
         if API_KEY:
-            # PolyMarket이 API Key를 'X-API-KEY' 헤더로 요구한다고 가정합니다.
-            # (만약 에러가 나면 이 헤더 이름은 API 문서에 맞게 수정해야 합니다.)
+            # 현재 'X-API-KEY'로 인증을 시도합니다.
             headers = {"X-API-KEY": API_KEY} 
             
         # API 호출 시 헤더를 포함합니다.
@@ -51,9 +49,10 @@ def fetch_current_prices():
         current_time = datetime.now().isoformat()
         
         for market in markets:
-            # 1. Active 시장만 필터링
-            if market.get('market_type') != 'basic':
-                continue
+            # 1. [핵심 수정 부분] market_type 필터링을 제거합니다. 
+            # (로그에서 확인된, 데이터를 0개로 만든 주된 원인입니다.)
+            # if market.get('market_type') != 'basic':
+            #     continue 
                 
             m_id = market.get("id")
             question = market.get("question")
@@ -66,7 +65,7 @@ def fetch_current_prices():
                 price_str = tokens[0].get("price", "0")
                 price = float(price_str)
                 
-                # 3. 추가 필터링: 거래량이 0이 아닌 시장만 포함 (잡코인 제외)
+                # 3. [유지] 추가 필터링: 거래량이 0이 아닌 시장만 포함 (잡코인 제외)
                 if float(market.get('volume', 0)) > 0:
                     data_snapshot[m_id] = {
                         "title": question,
