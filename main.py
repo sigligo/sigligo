@@ -12,7 +12,7 @@ PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
 # 인증을 가정하고 가장 안정적인 공용 URL로 다시 시도합니다.
 # 이 주소는 API 키가 없으면 404가 발생하거나 데이터를 반환하지 않을 수 있습니다.
-API_URL = "https://api.polymarket.com/markets?closed=false"
+API_URL = "https://gamma-api.polymarket.com/markets?closed=false"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
