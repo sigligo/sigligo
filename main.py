@@ -10,13 +10,14 @@ API_KEY = os.environ.get("POLYMARKET_API_KEY", None)
 SECRET = os.environ.get("POLYMARKET_SECRET", None) 
 PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
-# [최종 수정] 전체 시장 데이터 확보를 위해 v2 엔드포인트로 복구합니다.
-API_URL = "https://api.polymarket.com/v2/markets"
+# [최종 수정] 공식 문서에 명시된 Data-API 엔드포인트를 사용합니다.
+API_URL = "https://data-api.polymarket.com/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
 MIN_CORRELATION = 0.5  # Connection threshold (0.5 ~ 0.7 recommended)
 
+# ... (load_history 함수는 변경 없음) ...
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
@@ -39,7 +40,7 @@ def fetch_current_prices():
         response = requests.get(API_URL, headers=headers)
         response.raise_for_status()
         
-        # v2 API는 markets가 list 안에 바로 들어있습니다.
+        # 새로운 엔드포인트의 응답 구조를 가정하고 처리합니다.
         markets = response.json() 
 
         print(f"DEBUG: API returned {len(markets)} total markets.")
@@ -65,7 +66,7 @@ def fetch_current_prices():
                 # 가격 필드가 숫자로 변환 불가능하면 건너뜁니다.
                 continue 
             
-            # 3. [복구] 거래량이 0보다 큰 시장만 저장합니다. (비활성 시장 제외)
+            # 3. 거래량이 0보다 큰 시장만 저장합니다. (비활성 시장 제외)
             if float(market.get('volume', 0)) > 0:
                 data_snapshot[m_id] = {
                     "title": question,
@@ -73,13 +74,13 @@ def fetch_current_prices():
                     "timestamp": current_time
                 }
 
-        # 이 숫자가 0보다 커야 성공입니다.
         print(f"DEBUG: Processed {len(data_snapshot)} markets into snapshot.")
         return data_snapshot
     except Exception as e:
         print(f"Error fetching data: {e}")
         return {}
 
+# ... (update_history, calculate_correlation, main 함수는 변경 없음) ...
 def update_history(history, snapshot):
     for m_id, data in snapshot.items():
         if m_id not in history:
