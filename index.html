@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sigligo - Market Intelligence</title>
+    <script src="//unpkg.com/force-graph"></script>
+    <style>
+        body { 
+            margin: 0; 
+            font-family: 'Courier New', Courier, monospace; 
+            background-color: #050505; 
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #graph { width: 100vw; height: 100vh; }
+        .overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        h1 {
+            font-size: 24px;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #00ff88;
+            text-shadow: 0 0 10px #00ff88;
+        }
+        p { font-size: 12px; color: #888; margin-top: 5px; }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff88;
+            font-size: 18px;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="overlay">
+        <h1>Sigligo</h1>
+        <p>Polymarket Correlation Network</p>
+        <p id="status">Connecting to neural net...</p>
+    </div>
+    
+    <div id="loading" class="loading">ANALYZING DATA...</div>
+    <div id="graph"></div>
+
+    <script>
+        // Configuration
+        const DATA_URL = './graph_data.json'; 
+
+        // Initialize Graph
+        const Graph = ForceGraph()
+            (document.getElementById('graph'))
+            .backgroundColor('#050505')
+            .nodeId('id')
+            .nodeLabel('label')
+            .nodeVal('val')
+            .nodeColor(() => '#00ff88') // Matrix Green
+            .linkColor(() => '#333333')
+            .linkWidth(link => Math.abs(link.value) * 2) // Thicker lines for stronger correlation
+            .nodeCanvasObject((node, ctx, globalScale) => {
+                // Custom Node Rendering (Glowing Text)
+                const label = node.label;
+                const fontSize = 12/globalScale;
+                ctx.font = `${fontSize}px Sans-Serif`;
+                const textWidth = ctx.measureText(label).width;
+                const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.2); 
+
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = node.color;
+                ctx.fillText(label, node.x, node.y);
+
+                node.__bckgDimensions = bckgDimensions; // to re-use in nodePointerAreaPaint
+            })
+            .nodePointerAreaPaint((node, color, ctx) => {
+                ctx.fillStyle = color;
+                const bckgDimensions = node.__bckgDimensions;
+                bckgDimensions && ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
+            });
+
+        // Fetch Data
+        fetch(DATA_URL)
+            .then(res => {
+                if (!res.ok) throw new Error("Data file not found");
+                return res.json();
+            })
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                
+                // If no nodes yet
+                if (!data.nodes || data.nodes.length === 0) {
+                    document.getElementById('status').innerText = "Collecting initial data (Wait 15m)...";
+                    return;
+                }
+
+                document.getElementById('status').innerText = `Last Updated: ${data.last_updated}`;
+                Graph.graphData(data);
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('loading').innerText = "WAITING FOR DATA UPDATE...";
+                document.getElementById('status').innerText = "System Initializing...";
+            });
+    </script>
+</body>
+</html>
