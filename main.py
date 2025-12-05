@@ -3,21 +3,26 @@ import json
 import pandas as pd
 import os
 from datetime import datetime
+import time
+import hmac
+import hashlib
 
 # --- Configuration ---
-# GitHub Secret에서 API 키를 환경 변수로 가져옵니다.
 API_KEY = os.environ.get("POLYMARKET_API_KEY", None)
-SECRET = os.environ.get("POLYMARKET_SECRET", None) 
+SECRET = os.environ.get("POLYMARKET_SECRET", None)
 PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
-# [최종 수정] 공식 문서에 명시된 Data-API 엔드포인트를 사용합니다.
-API_URL = "https://data-api.polymarket.com/markets"
+# CLOB REST endpoint (정식 가격/오더북 제공)
+CLOB_URL = "https://clob.polymarket.com/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
-MIN_CORRELATION = 0.5  # Connection threshold (0.5 ~ 0.7 recommended)
+MIN_CORRELATION = 0.5
 
-# ... (load_history 함수는 변경 없음) ...
+
+# ---------------------------
+# Load History
+# ---------------------------
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
@@ -27,84 +32,116 @@ def load_history():
                 return {}
     return {}
 
-def fetch_current_prices():
-    print("Fetching data from Polymarket...")
-    try:
-        # API 키를 HTTP 헤더에 담아 전송합니다.
-        headers = {}
-        if API_KEY:
-            # API Key를 헤더에 포함하여 인증을 시도합니다.
-            headers = {"X-API-KEY": API_KEY} 
-            
-        # API 호출 시 헤더를 포함합니다.
-        response = requests.get(API_URL, headers=headers)
-        response.raise_for_status()
-        
-        # 새로운 엔드포인트의 응답 구조를 가정하고 처리합니다.
-        markets = response.json() 
 
-        print(f"DEBUG: API returned {len(markets)} total markets.")
-        
-        data_snapshot = {}
-        current_time = datetime.now().isoformat()
-        
-        for market in markets:
-            
-            m_id = market.get("id")
-            question = market.get("question", f"Market ID: {m_id}")
-            
-            tokens = market.get("tokens", [])
-            
-            # 1. 가격 정보가 없으면 건너뜁니다.
-            if not tokens or not tokens[0].get("price"):
+# ---------------------------
+# Signature 생성 함수 (CLOB 전용)
+# ---------------------------
+def clob_headers(method, endpoint, body=""):
+    timestamp = str(int(time.time() * 1000))
+    prehash = timestamp + method + endpoint + body
+
+    signature = hmac.new(
+        SECRET.encode(),
+        prehash.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    return {
+        "POLY-API-KEY": API_KEY,
+        "POLY-PASSPHRASE": PASSPHRASE,
+        "POLY-SIGNATURE": signature,
+        "POLY-TIMESTAMP": timestamp,
+    }
+
+
+# ---------------------------
+# Fetch Prices (CLOB)
+# ---------------------------
+def fetch_current_prices():
+    print("Fetching market data from CLOB API...")
+
+    try:
+        method = "GET"
+        endpoint = "/markets"
+
+        headers = clob_headers(method, endpoint)
+
+        response = requests.get(CLOB_URL, headers=headers)
+        response.raise_for_status()
+
+        markets = response.json()
+        print(f"DEBUG: Received {len(markets)} markets from CLOB")
+
+        snapshot = {}
+        now = datetime.now().isoformat()
+
+        for m in markets:
+            m_id = m.get("id")
+            title = m.get("question", "No Title")
+
+            tokens = m.get("tokens", [])
+            if not tokens:
+                continue
+
+            # 가격은 bid → ask → price 순으로 사용
+            price = (
+                tokens[0].get("bestBid")
+                or tokens[0].get("bestAsk")
+                or tokens[0].get("price")
+            )
+
+            if price is None:
                 continue
 
             try:
-                # 2. 정확한 가격을 float로 가져옵니다.
-                price = float(tokens[0].get("price"))
-            except (ValueError, TypeError):
-                # 가격 필드가 숫자로 변환 불가능하면 건너뜁니다.
-                continue 
-            
-            # 3. 거래량이 0보다 큰 시장만 저장합니다. (비활성 시장 제외)
-            if float(market.get('volume', 0)) > 0:
-                data_snapshot[m_id] = {
-                    "title": question,
-                    "price": price, 
-                    "timestamp": current_time
-                }
+                price = float(price)
+            except:
+                continue
 
-        print(f"DEBUG: Processed {len(data_snapshot)} markets into snapshot.")
-        return data_snapshot
+            snapshot[m_id] = {
+                "title": title,
+                "price": price,
+                "timestamp": now
+            }
+
+        print(f"DEBUG: Snapshot contains {len(snapshot)} markets.")
+        return snapshot
+
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        print("❌ Error:", e)
         return {}
 
-# ... (update_history, calculate_correlation, main 함수는 변경 없음) ...
+
+# ---------------------------
+# Update History
+# ---------------------------
 def update_history(history, snapshot):
     for m_id, data in snapshot.items():
         if m_id not in history:
             history[m_id] = {"title": data["title"], "prices": []}
-        
+
         history[m_id]["prices"].append({
             "t": data["timestamp"],
             "p": data["price"]
         })
-        
-        # Keep last 336 data points (approx. 7 days if run every 30 mins)
-        if len(history[m_id]["prices"]) > 336: 
+
+        if len(history[m_id]["prices"]) > 336:
             history[m_id]["prices"] = history[m_id]["prices"][-336:]
-            
+
     return history
 
+
+# ---------------------------
+# Correlation
+# ---------------------------
 def calculate_correlation(history):
     print("Calculating correlations...")
     data_dict = {}
-    
-    # Create Pandas Series for each market
+
     for m_id, content in history.items():
-        if len(content["prices"]) < 5: # Need minimal data to correlate
+        if len(content["prices"]) < 5:
             continue
+
         prices = [entry["p"] for entry in content["prices"]]
         data_dict[m_id] = pd.Series(prices)
 
@@ -112,39 +149,31 @@ def calculate_correlation(history):
         return [], []
 
     df = pd.DataFrame(data_dict)
-    # Fill missing values to avoid errors (Forward fill then Backward fill)
     df = df.fillna(method='ffill').fillna(method='bfill')
-    
-    # NaN 값이 남는 경우 (시계열 전체가 NaN인 경우)를 대비해 안전하게 처리
     df = df.dropna(axis=1, how='all')
 
-    # 데이터프레임에 유효한 열이 없으면 상관관계 계산을 건너뜕니다.
     if df.empty:
         return [], []
 
     corr_matrix = df.corr()
-    
+
     nodes = []
     links = []
-    
-    # 1. Create Nodes
+
     for m_id in corr_matrix.columns:
         nodes.append({
             "id": m_id,
-            "label": history[m_id]["title"], 
-            "val": 1 
+            "label": history[m_id]["title"],
+            "val": 1
         })
-        
-    # 2. Create Links (Edges)
+
     cols = corr_matrix.columns
     for i in range(len(cols)):
         for j in range(i + 1, len(cols)):
             col1 = cols[i]
             col2 = cols[j]
             val = corr_matrix.iloc[i, j]
-            
-            # Correlation Logic: Positive or Negative strong correlation
-            # NaN (Not a Number) 값이 나오면 건너뜕니다.
+
             if pd.isna(val):
                 continue
 
@@ -154,35 +183,38 @@ def calculate_correlation(history):
                     "target": col2,
                     "value": round(val, 2)
                 })
-                
+
     return nodes, links
 
+
+# ---------------------------
+# Main
+# ---------------------------
 def main():
     history = load_history()
     snapshot = fetch_current_prices()
-    
+
     if snapshot:
         updated_history = update_history(history, snapshot)
-        
-        # Save History
+
         with open(HISTORY_FILE, "w") as f:
-            json.dump(updated_history, f, indent=4) # 가독성을 위해 indent 추가
-            
-        # Generate Graph Data
+            json.dump(updated_history, f, indent=4)
+
         nodes, links = calculate_correlation(updated_history)
-        
+
         graph_data = {
             "nodes": nodes,
             "links": links,
             "last_updated": datetime.now().isoformat()
         }
-        
+
         with open(OUTPUT_FILE, "w") as f:
-            json.dump(graph_data, f, indent=4) # 가독성을 위해 indent 추가
-            
+            json.dump(graph_data, f, indent=4)
+
         print(f"✅ Update Complete. Nodes: {len(nodes)}, Links: {len(links)}")
     else:
         print("⚠️ No data fetched.")
+
 
 if __name__ == "__main__":
     main()
