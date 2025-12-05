@@ -23,6 +23,8 @@ def fetch_current_prices():
         response = requests.get(API_URL)
         response.raise_for_status()
         markets = response.json()
+
+        print(f"DEBUG: API returned {len(markets)} total markets.")
         
         data_snapshot = {}
         current_time = datetime.now().isoformat()
@@ -40,6 +42,9 @@ def fetch_current_prices():
                     "price": price,
                     "timestamp": current_time
                 }
+
+        print(f"DEBUG: Processed {len(data_snapshot)} markets into snapshot.")
+        
         return data_snapshot
     except Exception as e:
         print(f"Error fetching data: {e}")
