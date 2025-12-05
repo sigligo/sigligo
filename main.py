@@ -7,7 +7,7 @@ from datetime import datetime
 # =========================
 # CONFIGURATION
 # =========================
-API_URL = "https://api.polymarket.com/markets"
+API_URL = "https://prod.api.polymarket.com/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
