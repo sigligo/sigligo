@@ -10,8 +10,8 @@ API_KEY = os.environ.get("POLYMARKET_API_KEY", None)
 SECRET = os.environ.get("POLYMARKET_SECRET", None) 
 PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
-# [수정됨] DNS 오류로 인해 v2 주소 대신, 접속 가능했던 gamma-api 주소로 복구합니다.
-API_URL = "https://gamma-api.polymarket.com/markets?closed=false"
+# [최종 수정] 전체 시장 데이터 확보를 위해 v2 엔드포인트로 복구합니다.
+API_URL = "https://api.polymarket.com/v2/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
@@ -32,14 +32,14 @@ def fetch_current_prices():
         # API 키를 HTTP 헤더에 담아 전송합니다.
         headers = {}
         if API_KEY:
-            # 현재 'X-API-KEY'로 인증을 시도합니다.
+            # API Key를 헤더에 포함하여 인증을 시도합니다.
             headers = {"X-API-KEY": API_KEY} 
             
         # API 호출 시 헤더를 포함합니다.
         response = requests.get(API_URL, headers=headers)
         response.raise_for_status()
         
-        # 최신 API는 markets가 list 안에 바로 들어있습니다.
+        # v2 API는 markets가 list 안에 바로 들어있습니다.
         markets = response.json() 
 
         print(f"DEBUG: API returned {len(markets)} total markets.")
@@ -52,28 +52,28 @@ def fetch_current_prices():
             m_id = market.get("id")
             question = market.get("question", f"Market ID: {m_id}")
             
-            # 가격을 가져오지 못하면 기본값 0.5로 설정
-            price = 0.5 
-            
             tokens = market.get("tokens", [])
             
-            # 가격 정보가 있다면 가져오고, 유효하지 않으면 기본값 0.5 유지 (혹시 모를 오류 방지)
-            if tokens and tokens[0].get("price"):
-                try:
-                    price = float(tokens[0].get("price"))
-                except (ValueError, TypeError):
-                    # 가격 변환 오류가 발생하면 기본값 0.5를 사용하거나,
-                    # 이 시장이 이상하다고 판단되면 건너뜁니다.
-                    # 여기서는 안전하게 건너뛰지 않고 0.5로 설정하여 일단 저장합니다.
-                    pass
-            
-            # 거래량 필터를 제거하여 20개 데이터를 모두 저장합니다.
-            data_snapshot[m_id] = {
-                "title": question,
-                "price": price,
-                "timestamp": current_time
-            }
+            # 1. 가격 정보가 없으면 건너뜁니다.
+            if not tokens or not tokens[0].get("price"):
+                continue
 
+            try:
+                # 2. 정확한 가격을 float로 가져옵니다.
+                price = float(tokens[0].get("price"))
+            except (ValueError, TypeError):
+                # 가격 필드가 숫자로 변환 불가능하면 건너뜁니다.
+                continue 
+            
+            # 3. [복구] 거래량이 0보다 큰 시장만 저장합니다. (비활성 시장 제외)
+            if float(market.get('volume', 0)) > 0:
+                data_snapshot[m_id] = {
+                    "title": question,
+                    "price": price, 
+                    "timestamp": current_time
+                }
+
+        # 이 숫자가 0보다 커야 성공입니다.
         print(f"DEBUG: Processed {len(data_snapshot)} markets into snapshot.")
         return data_snapshot
     except Exception as e:
