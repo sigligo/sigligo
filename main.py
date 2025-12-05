@@ -11,7 +11,7 @@ SECRET = os.environ.get("POLYMARKET_SECRET", None)
 PASSPHRASE = os.environ.get("POLYMARKET_PASSPHRASE", None)
 
 # 인증을 가정하고 가장 안정적인 주소로 재시도합니다. (DNS 오류 우회 주소)
-API_URL = "https://gamma-api.polymarket.com/markets?closed=false"
+API_URL = "https://api.polymarket.com/v2/markets"
 
 HISTORY_FILE = "data_history.json"
 OUTPUT_FILE = "graph_data.json"
